@@ -1,0 +1,16 @@
+Namespace inside NodeGroups is not unique.
+
+Solutions:
+1. Use group name in the key.
+2. Have a sub dictionary for internal node groups
+
+
+Solution 2:
+
+current: src_node_dic [node_name: node]
+
+
+Change:
+Replace missing nodes with a node group,
+matching the original outputs.
+Remove linking error after above.
