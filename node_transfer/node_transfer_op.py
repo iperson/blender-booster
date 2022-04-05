@@ -1,6 +1,10 @@
-from ast import NodeTransformer
 import bpy
-import re
+
+
+class BB_NodeTree():
+    def __init__(self):
+        self.active_nodes = {}
+        self.type = ""
 
 
 class BOOSTER_OT_CopyNodes(bpy.types.Operator):
@@ -16,25 +20,16 @@ class BOOSTER_OT_CopyNodes(bpy.types.Operator):
         return False
 
     def execute(self, context):
-        # node_name : outputs[] > links [] > (node_name :, socket_name :)
-        bpy.types.Scene.booster_src_node_dic = {}
-        bpy.types.Scene.booster_src_node_tree_data = {}
+        # create indexes for sockets
+        set_socket_index(bpy.context.space_data.node_tree)
 
-        # for each link in each output in each node
-        # store connected node name and socket
+        bpy.types.Scene.booster_src_node_tree = BB_NodeTree()
+        src_nodes_tree = bpy.types.Scene.booster_src_node_tree
+        src_nodes_tree.type = bpy.context.space_data.node_tree.type
+
+        # get selected nodes and groups
         for node in context.selected_nodes:
-            outputs = []
-            for out in node.outputs:
-                links = []
-                for lnk in out.links:
-                    links.append(
-                        {'node_name' : lnk.to_node.name,
-                        'socket_name' : lnk.to_socket.identifier}
-                        )
-                outputs.append(links)
-
-            context.scene.booster_src_node_tree_data[node.name] = outputs
-            context.scene.booster_src_node_dic[node.name] = node
+            src_nodes_tree.active_nodes[node.name] = node
 
         # update Paste buttons
         for area in bpy.context.window.screen.areas:
@@ -43,6 +38,17 @@ class BOOSTER_OT_CopyNodes(bpy.types.Operator):
 
         return {'FINISHED'}
 
+def set_socket_index(node_tree):
+    if node_tree == None:
+        return
+
+    for node in node_tree.nodes:
+        if node.type == 'GROUP':
+            set_socket_index(node.node_tree)
+
+        for i, inp in enumerate(node.inputs):
+            for lnk in inp.links:
+                lnk.to_socket['index'] = i
 
 class BOOSTER_OT_PasteNodes(bpy.types.Operator):
     """Paste nodes into the context editor"""
@@ -52,7 +58,7 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
     @classmethod
     def poll(self, context):
         try:
-            context.scene.booster_src_node_dic
+            context.scene.booster_src_node_tree
             return True
         except:
             return False
@@ -60,19 +66,53 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
     def execute(self, context):
         # local node group
         node_tree = context.space_data.node_tree
-        src_node_tree_data = context.scene.booster_src_node_tree_data
-        src_node_dic = context.scene.booster_src_node_dic
 
         # deselect all nodes
         for node in node_tree.nodes:
             node.select = False
 
-        imported_nodes_dic = {}
-        # imported_node_names = []
+        # source node group
+        src_node_tree = context.scene.booster_src_node_tree
+        transfer_nodes(node_tree, src_node_tree)
+                            
+        # remove temp globals
+        del bpy.types.Scene.booster_src_node_tree
 
-        # paste nodes into node tree
-        for node in src_node_dic.values():
-            node_type = node.type.title()
+        return {'FINISHED'}
+
+def transfer_nodes(node_tree, src_node_tree):
+    imported_nodes_dic = {}
+
+    tree_type = node_tree.type
+
+    for src_node in src_node_tree.active_nodes.values():
+        # handle Group node
+        if src_node.type == 'GROUP':
+            if 'SHADER' == tree_type:
+                data_group = bpy.data.node_groups.new(src_node.node_tree.name, 'ShaderNodeTree')
+                pasted_node = node_tree.nodes.new('ShaderNodeGroup')
+                pasted_node.node_tree = data_group
+            elif 'GEOMETRY' == tree_type:
+                data_group = bpy.data.node_groups.new(src_node.name, 'GeometryNodeTree')
+                pasted_node = node_tree.nodes.new('GeometryNodeGroup')
+                pasted_node.node_tree = data_group
+            else:
+                raise Exception("Error, no match for tree type!")
+
+            # create inputs and outputs
+            for src_inp in src_node.inputs:
+                pasted_node.inputs.new(src_inp.rna_type.identifier, src_inp.name)
+            for src_opt in src_node.outputs:
+                pasted_node.outputs.new(src_opt.rna_type.identifier, src_opt.name)
+
+            # transfer nodes in group
+            sub_src_node_tree = BB_NodeTree()
+            for n in src_node.node_tree.nodes:
+                sub_src_node_tree.active_nodes[n.name] = n
+                sub_src_node_tree.type = src_node_tree.type
+            transfer_nodes(data_group, sub_src_node_tree)
+        else:
+            node_type = src_node.type.title()
 
             # handle special cases for textures
             if 'noise' in node_type.lower():
@@ -81,115 +121,117 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
 
             # add new copied node or generate node if id not available
             try:
-                pasted_node = node_tree.nodes.new(node.bl_idname)
+                if src_node.bl_idname == 'ShaderNodeGroup':
+                    pasted_node = node_tree.nodes.new('ShaderNodeGroup')
+                elif src_node.bl_idname == 'GeometryNodeGroup':
+                    pasted_node = node_tree.nodes.new('GeometryNodeGroup')
+                else:
+                    pasted_node = node_tree.nodes.new(src_node.bl_idname)
             except RuntimeError:
-                print("BOOSTER: Cannot add node id:", node.bl_idname)
+                print("BOOSTER: Cannot add node id:", src_node.bl_idname)
                 pasted_node = node_tree.nodes.new('ShaderNodeMixRGB')
                 pasted_node.use_custom_color = True
                 pasted_node.color = (0.5,0,0)
-                pasted_node.label = "{} _BB_replaced".format(node.name)
-                if node.parent:
-                    pasted_node.location = node.location + node.parent.location
+
+                if src_node.parent:
+                    pasted_node.location = src_node.location + src_node.parent.location
                 else:
-                    pasted_node.location = node.location
-                imported_nodes_dic[node.name] = pasted_node
-                continue
+                    pasted_node.location = src_node.location
 
-            imported_nodes_dic[node.name] = pasted_node
+                imported_nodes_dic[src_node.name] = pasted_node
+                continue # skip transfering parameters
 
-            # copy props
-            for prop in node.bl_rna.properties[2:]:
+        imported_nodes_dic[src_node.name] = pasted_node
+
+        # copy basic props
+        for prop in src_node.bl_rna.properties[2:]:
+            identifier = prop.identifier
+            # handle location for nodes with layout
+            if src_node.parent and identifier == 'location':
+                pasted_node.location = src_node.location + src_node.parent.location
+            # copy standard properties
+            elif not prop.is_readonly and 'bl_' not in identifier and identifier != 'parent':
+                attr = getattr(src_node, identifier)
+                try:
+                    vars(attr)
+                except TypeError:
+                    if type(attr) in ['PointerProperty', 'NodeGroup']:
+                        setattr(pasted_node, identifier, attr)
+
+        # handle ColorRamp type VALTORGB node
+        if src_node.type == 'VALTORGB':
+            for prop in pasted_node.color_ramp.bl_rna.properties[2:]:
                 identifier = prop.identifier
-                # handle location for nodes with layout
-                if node.parent and identifier == 'location':
-                    pasted_node.location = node.location + node.parent.location
-                # copy standard properties
-                elif not prop.is_readonly and 'bl_' not in identifier and identifier != 'parent':
-                    attr = getattr(node, identifier)                        
+                if not prop.is_readonly and 'bl_' not in identifier and identifier != 'parent':
+                    attr = getattr(src_node.color_ramp, identifier)                        
                     try:
                         vars(attr)
                     except TypeError:
                         if type(attr) != 'PointerProperty':
-                            setattr(pasted_node, identifier, attr)
+                            setattr(pasted_node.color_ramp, identifier, attr)
+            # set color stops (elements)
+            while len(pasted_node.color_ramp.elements) < len(src_node.color_ramp.elements):
+                pasted_node.color_ramp.elements.new(0)
+            for i, e in enumerate(src_node.color_ramp.elements):
+                pasted_node.color_ramp.elements[i].position = e.position
+                pasted_node.color_ramp.elements[i].color = e.color
 
-            # handle ColorRamp type VALTORGB node
-            if node.type == 'VALTORGB':
-                for prop in pasted_node.color_ramp.bl_rna.properties[2:]:
-                    identifier = prop.identifier
-                    if not prop.is_readonly and 'bl_' not in identifier and identifier != 'parent':
-                        attr = getattr(node.color_ramp, identifier)                        
-                        try:
-                            vars(attr)
-                        except TypeError:
-                            if type(attr) != 'PointerProperty':
-                                setattr(pasted_node.color_ramp, identifier, attr)
-                # set color stops (elements)
-                while len(pasted_node.color_ramp.elements) < len(node.color_ramp.elements):
-                    pasted_node.color_ramp.elements.new(0)
-                for i, e in enumerate(node.color_ramp.elements):
-                    pasted_node.color_ramp.elements[i].position = e.position
-                    pasted_node.color_ramp.elements[i].color = e.color
+        # handle location for GROUP_INPUT/OUTPUT
+        if src_node.type in ['GROUP_INPUT', 'GROUP_OUTPUT']:
+            pasted_node.location = src_node.location
 
-        # add nodes to frames
-        for src_name, src_node in src_node_dic.items():
-            # add to frame
-            if src_node.parent != None:
-                frame_node = imported_nodes_dic.get(src_node.parent.name)
-                node = imported_nodes_dic.get(src_name)
+    # add nodes to frames
+    for src_name, src_node in src_node_tree.active_nodes.items():
+        # add to frame
+        if src_node.parent != None:
+            frame_node = imported_nodes_dic.get(src_node.parent.name)
+            node = imported_nodes_dic.get(src_name)
 
-                if frame_node and node:
-                    node.parent = frame_node                
+            if frame_node and node:
+                node.parent = frame_node
+
+    # transfer socket values
+    for name, node in imported_nodes_dic.items():
+        if not node:
+            continue
+
+        if node.type in ['REROUTE', 'FRAME']:
+            continue
+
+        # skip nodes that have been replaced
+        if '_BB_replaced' in node.label:
+            continue
 
         # transfer socket values
-        for name, node in imported_nodes_dic.items():
-            if node.type in ['REROUTE', 'FRAME']:
-                continue
+        src_node = src_node_tree.active_nodes[name]
+        for i, inp in enumerate(src_node.inputs):
+            if node.inputs[i].bl_rna.identifier != 'NodeSocketVirtual':
+                node.inputs[i].default_value = inp.default_value
 
-            if '_BB_replaced' in node.label:
-                continue
+    # generate links in the node tree for each added node
+    for name, node in imported_nodes_dic.items():
+        if node.type == 'FRAME':
+            continue
 
-            if name != src_node_dic[name].name:
-                raise NameError
+        src_node = src_node_tree.active_nodes[name]
 
-            src_inputs = src_node_dic[name].inputs
-            for index, inp in enumerate(src_inputs):
-                print()
-                print(name)
-                print(node.name)
-                print(src_node_dic[name].name)
-                print(inp.default_value)
-                print(inp)
-                node.inputs[index].default_value = inp.default_value
+        # for each node output make new links
+        for i, opt in enumerate(src_node.outputs):
+            for lnk in opt.links:
+                to_node = imported_nodes_dic.get(lnk.to_node.name)
+                from_node = imported_nodes_dic.get(lnk.from_node.name)
 
-        # generate links in the node tree for each added node
-        for node_name, node in imported_nodes_dic.items():
-            if node.type == 'FRAME':
-                continue
+                if to_node == None:
+                    continue
 
-            src_node = src_node_dic[node_name]
+                print("linking: {} to {}".format(name, to_node.name))
 
-            # for each node output make new links
-            for o in src_node.outputs:
-                for lnk in o.links:
-                    try:
-                        to_socket_name = lnk.to_socket.identifier
-                        to_node_name = lnk.to_node.name
-                        # get index from the end of the scoket name SocketName.001
-                        socket_index = int('0' + ''.join(re.findall(r'\d+', to_socket_name)))
-                        to_socket = imported_nodes_dic[to_node_name].inputs[socket_index]
+                # handle substitution nodes
+                if node.type != src_node.type:
+                    from_socket = imported_nodes_dic[name].outputs[0]
+                else:
+                    from_socket = from_node.outputs[i]
 
-                        # handle substitution nodes
-                        if node.type != src_node:
-                            from_socket = o[0]
-                        else:
-                            from_socket = imported_nodes_dic[node_name].outputs[o.identifier]
-                            
-                        node_tree.links.new(from_socket, to_socket)
-                    except KeyError:
-                        print("BOOSTER: Linking error from {} to {}.".format(node_name, to_node_name))
-                            
-        # remove temp globals
-        del bpy.types.Scene.booster_src_node_dic
-        del bpy.types.Scene.booster_src_node_tree_data
-
-        return {'FINISHED'}
+                index = lnk.to_socket.get('index')
+                to_socket = to_node.inputs[index]
+                node_tree.links.new(from_socket, to_socket)
