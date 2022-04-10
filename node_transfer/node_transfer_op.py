@@ -120,7 +120,10 @@ def transfer_nodes(node_tree, src_node_tree):
                 pasted_node['bb_type'] = 'transfer'
             except RuntimeError:
                 print("BOOSTER: Cannot add node id:", src_node.bl_idname)
-                pasted_node = make_group_from_node(node_tree, src_node)
+                # see if our blend file has a replacement node
+                pasted_node = get_node_from_file(node_tree, src_node.bl_rna.identifier)
+                if pasted_node == None:
+                    pasted_node = make_group_from_node(node_tree, src_node)
 
         transfer_location(pasted_node, src_node)
         imported_nodes_dic[src_node.name] = pasted_node
@@ -269,9 +272,27 @@ def transfer_props(pasted_node, src_node):
     if src_node.type in ['GROUP_INPUT', 'GROUP_OUTPUT']:
         pasted_node.location = src_node.location
 
-
+# transfer location
 def transfer_location(pasted_node, src_node):
     if src_node.parent:
         pasted_node.location = src_node.location + src_node.parent.location
     else:
         pasted_node.location = src_node.location
+
+# convert node types from .blend
+def get_node_from_file(node_tree, append_node_name):
+    # path to file
+    asset_blend_path = __file__.replace("node_transfer_op.py", "node_groups.blend")
+    with bpy.data.libraries.load(asset_blend_path, link=False) as (data_from, data_to):
+        data_to.node_groups = [append_node_name]
+    
+    ngroup = bpy.data.node_groups[append_node_name]
+
+    if 'SHADER' == node_tree.type:
+        node_group = node_tree.nodes.new('ShaderNodeGroup')
+        node_group.node_tree = ngroup
+    elif 'GEOMETRY' == node_tree.type:
+        node_group = node_tree.nodes.new('GeometryNodeGroup')
+        node_group.node_tree = ngroup
+    
+    return node_group
