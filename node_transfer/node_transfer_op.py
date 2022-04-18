@@ -10,6 +10,7 @@ class BB_NodeTree():
 class BOOSTER_OT_CopyNodes(bpy.types.Operator):
     """Copy nodes from the context editor"""
     bl_idname = "scene.booster_copy_nodes"
+    bl_description = "Copy node selection."
     bl_label = "Copy Nodes"
 
     @classmethod
@@ -33,26 +34,28 @@ class BOOSTER_OT_CopyNodes(bpy.types.Operator):
 
         # update Paste buttons
         for area in bpy.context.window.screen.areas:
-            if area.type == 'NODE_EDITOR':
+            if area.type == "NODE_EDITOR":
                 area.tag_redraw()
 
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 def set_socket_index(node_tree):
     if node_tree == None:
         return
 
     for node in node_tree.nodes:
-        if node.type == 'GROUP':
+        if node.type == "GROUP":
             set_socket_index(node.node_tree)
 
         for i, inp in enumerate(node.inputs):
             for lnk in inp.links:
-                lnk.to_socket['index'] = i
+                lnk.to_socket["index"] = i
+
 
 class BOOSTER_OT_PasteNodes(bpy.types.Operator):
     """Paste nodes into the context editor"""
     bl_idname = "scene.booster_paste_nodes"
+    bl_description = "Paste node selection."
     bl_label = "Paste Nodes"
 
     @classmethod
@@ -78,18 +81,18 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
         # remove temp globals
         del bpy.types.Scene.booster_src_node_tree
 
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 def transfer_nodes(node_tree, src_node_tree):
     # store transfered nodes using original node names as keys
-    # this way node name changes don't cause a problem
+    # this way node name changes don"t cause a problem
     imported_nodes_dic = {}
 
     for src_node in src_node_tree.active_nodes.values():
         # handle Group node
-        if src_node.type == 'GROUP':
+        if src_node.type == "GROUP":
             pasted_node = make_group_copy(node_tree, src_node)
-            pasted_node['bb_type'] = 'transfer'
+            pasted_node["bb_type"] = "transfer"
 
             # transfer nodes in group
             sub_src_node_tree = BB_NodeTree()
@@ -103,21 +106,21 @@ def transfer_nodes(node_tree, src_node_tree):
             node_type = src_node.type.title()
 
             # handle special cases for textures
-            if 'noise' in node_type.lower():
-                node_type = [piece.title() for piece in node_type.split('_')]
-                node_type = ''.join(node_type)
+            if "noise" in node_type.lower():
+                node_type = [piece.title() for piece in node_type.split("_")]
+                node_type = "".join(node_type)
 
             # add new copied node or generate node if id not available
             try:
-                if src_node.bl_idname == 'ShaderNodeGroup':
-                    pasted_node = node_tree.nodes.new('ShaderNodeGroup')
-                elif src_node.bl_idname == 'GeometryNodeGroup':
-                    pasted_node = node_tree.nodes.new('GeometryNodeGroup')
+                if src_node.bl_idname == "ShaderNodeGroup":
+                    pasted_node = node_tree.nodes.new("ShaderNodeGroup")
+                elif src_node.bl_idname == "GeometryNodeGroup":
+                    pasted_node = node_tree.nodes.new("GeometryNodeGroup")
                 else:
                     pasted_node = node_tree.nodes.new(src_node.bl_idname)
                 
                 transfer_props(pasted_node, src_node)
-                pasted_node['bb_type'] = 'transfer'
+                pasted_node["bb_type"] = "transfer"
             except RuntimeError:
                 print("BOOSTER: Cannot add node id:", src_node.bl_idname)
                 # see if our blend file has a replacement node
@@ -143,23 +146,23 @@ def transfer_nodes(node_tree, src_node_tree):
         if not node:
             continue
 
-        if node.type in ['REROUTE', 'FRAME']:
+        if node.type in ["REROUTE", "FRAME"]:
             continue
 
         # skip nodes that have been replaced
-        if node.get('bb_type') == 'mix':
+        if node.get("bb_type") == "mix":
             continue
 
         # transfer socket values
         src_node = src_node_tree.active_nodes[name]
         for i, inp in enumerate(src_node.inputs):
             if (node.inputs[i].bl_rna.identifier not in 
-            ('NodeSocketVirtual', 'NodeSocketShader', 'NodeSocketGeometry')):
+            ("NodeSocketVirtual", "NodeSocketShader", "NodeSocketGeometry")):
                 node.inputs[i].default_value = inp.default_value
 
     # generate links in the node tree for each added node
     for name, node in imported_nodes_dic.items():
-        if node.type == 'FRAME':
+        if node.type == "FRAME":
             continue
 
         src_node = src_node_tree.active_nodes[name]
@@ -173,25 +176,22 @@ def transfer_nodes(node_tree, src_node_tree):
                 if to_node == None:
                     continue
 
-                print("linking: {} to {}".format(name, to_node.name))
-
-                from_socket = from_node.outputs[i]
-
-                index = lnk.to_socket.get('index')
+                index = lnk.to_socket.get("index")
                 to_socket = to_node.inputs[index]
+                from_socket = from_node.outputs[i]
                 node_tree.links.new(from_socket, to_socket)
 
     for node in imported_nodes_dic.values():
         node.select = True
 
 def make_group_copy(node_tree, src_node_group):
-    if 'SHADER' == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node_group.name, 'ShaderNodeTree')
-        node_group = node_tree.nodes.new('ShaderNodeGroup')
+    if "SHADER" == node_tree.type:
+        data_group = bpy.data.node_groups.new(src_node_group.name, "ShaderNodeTree")
+        node_group = node_tree.nodes.new("ShaderNodeGroup")
         node_group.node_tree = data_group
-    elif 'GEOMETRY' == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node_group.name, 'GeometryNodeTree')
-        node_group = node_tree.nodes.new('GeometryNodeGroup')
+    elif "GEOMETRY" == node_tree.type:
+        data_group = bpy.data.node_groups.new(src_node_group.name, "GeometryNodeTree")
+        node_group = node_tree.nodes.new("GeometryNodeGroup")
         node_group.node_tree = data_group
     else:
         raise Exception("Error, no match for tree type!")
@@ -207,23 +207,23 @@ def make_group_copy(node_tree, src_node_group):
     return node_group
 
 def make_group_from_node(node_tree, src_node):
-    if 'SHADER' == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node.name, 'ShaderNodeTree')
-        node_group = node_tree.nodes.new('ShaderNodeGroup')
+    if "SHADER" == node_tree.type:
+        data_group = bpy.data.node_groups.new(src_node.name, "ShaderNodeTree")
+        node_group = node_tree.nodes.new("ShaderNodeGroup")
         node_group.node_tree = data_group
-    elif 'GEOMETRY' == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node.name, 'GeometryNodeTree')
-        node_group = node_tree.nodes.new('GeometryNodeGroup')
+    elif "GEOMETRY" == node_tree.type:
+        data_group = bpy.data.node_groups.new(src_node.name, "GeometryNodeTree")
+        node_group = node_tree.nodes.new("GeometryNodeGroup")
         node_group.node_tree = data_group
     else:
         raise Exception("Error, no match for tree type!")
 
     # change socket type to current node tree type
     def re_type(type):
-        if 'shader' in type.lower():
-            return 'NodeSocketGeometry'
-        if 'geom' in type.lower():
-            return 'NodeSocketShader'
+        if "shader" in type.lower():
+            return "NodeSocketGeometry"
+        if "geom" in type.lower():
+            return "NodeSocketShader"
         return type
 
     # create inputs and outputs
@@ -235,7 +235,7 @@ def make_group_from_node(node_tree, src_node):
         node_group.outputs.new(type, src_opt.name)
 
     # set some custom properties
-    node_group['bb_type'] = 'mix'
+    node_group["bb_type"] = "mix"
     node_group.use_custom_color = True
     node_group.color = (0.7919, 0.4828, 0.3737)
     node_group.label = src_node.label
@@ -249,15 +249,15 @@ def transfer_props(pasted_node, src_node):
         identifier = prop.identifier
 
         # copy standard properties
-        if not prop.is_readonly and identifier != 'parent':
+        if not prop.is_readonly and identifier != "parent":
             attr = getattr(src_node, identifier)
             setattr(pasted_node, identifier, attr)
 
     # handle ColorRamp type VALTORGB node
-    if src_node.type == 'VALTORGB':
+    if src_node.type == "VALTORGB":
         for prop in pasted_node.color_ramp.bl_rna.properties[2:]:
             identifier = prop.identifier
-            if not prop.is_readonly and 'bl_' not in identifier and identifier != 'parent':
+            if not prop.is_readonly and "bl_" not in identifier and identifier != "parent":
                 attr = getattr(src_node.color_ramp, identifier)                        
                 setattr(pasted_node.color_ramp, identifier, attr)
                         
@@ -269,15 +269,18 @@ def transfer_props(pasted_node, src_node):
             pasted_node.color_ramp.elements[i].color = e.color
 
     # handle location for GROUP_INPUT/OUTPUT
-    if src_node.type in ['GROUP_INPUT', 'GROUP_OUTPUT']:
+    if src_node.type in ["GROUP_INPUT", "GROUP_OUTPUT"]:
         pasted_node.location = src_node.location
 
 # transfer location
 def transfer_location(pasted_node, src_node):
-    if src_node.parent:
-        pasted_node.location = src_node.location + src_node.parent.location
-    else:
-        pasted_node.location = src_node.location
+    def get_frame_deep_location(node):
+        loc = node.location.copy()
+        if node.parent:
+            loc += get_frame_deep_location(node.parent)
+        return loc
+
+    pasted_node.location = get_frame_deep_location(src_node)
 
 # convert node types from .blend
 def get_node_from_file(node_tree, append_node_name):
@@ -286,13 +289,15 @@ def get_node_from_file(node_tree, append_node_name):
     with bpy.data.libraries.load(asset_blend_path, link=False) as (data_from, data_to):
         data_to.node_groups = [append_node_name]
     
-    ngroup = bpy.data.node_groups[append_node_name]
-
-    if 'SHADER' == node_tree.type:
-        node_group = node_tree.nodes.new('ShaderNodeGroup')
-        node_group.node_tree = ngroup
-    elif 'GEOMETRY' == node_tree.type:
-        node_group = node_tree.nodes.new('GeometryNodeGroup')
-        node_group.node_tree = ngroup
-    
-    return node_group
+    ngroup = bpy.data.node_groups.get(append_node_name)
+    if ngroup:
+        if "SHADER" == node_tree.type:
+            node_group = node_tree.nodes.new("ShaderNodeGroup")
+            node_group.node_tree = ngroup
+        elif "GEOMETRY" == node_tree.type:
+            node_group = node_tree.nodes.new("GeometryNodeGroup")
+            node_group.node_tree = ngroup
+        
+        return node_group
+    else:
+        return None

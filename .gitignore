@@ -1,4 +1,6 @@
 *.txt
 *.pyc
-__pycache__/
 *.blend1
+__pycache__/
+media/
+node_transfer/__pycache__/
