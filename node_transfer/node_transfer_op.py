@@ -15,8 +15,9 @@ class BOOSTER_OT_CopyNodes(bpy.types.Operator):
 
     @classmethod
     def poll(self, context):
-        if len(context.selected_nodes):
-            return True
+        if context.space_data.node_tree and context.space_data.node_tree.type in ('SHADER','GEOMETRY'):
+            if len(context.selected_nodes):
+                return True
 
         return False
 
@@ -60,11 +61,11 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
 
     @classmethod
     def poll(self, context):
-        try:
-            context.scene.booster_src_node_tree
-            return True
-        except:
-            return False
+        if context.space_data.node_tree and context.space_data.node_tree.type in ('SHADER','GEOMETRY'):
+            if hasattr(context.scene, 'booster_src_node_tree'):
+                return True
+        
+        return False
 
     def execute(self, context):
         # local node group
