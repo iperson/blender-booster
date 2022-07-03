@@ -6,9 +6,8 @@ bl_info = {
     "author" : "Valeri Barashkov",
     "description" : "",
     "blender" : (3, 2, 0),
-    "version" : (0, 1, 0),
+    "version" : (0, 1, 1),
     "location" : "Either header or the right side panel under BB tab.",
-    "warning" : "Requires Blender 3.2 or Fix T96909, otherwise will crash on group copy from Shader to Geometry Nodes!",
     "category" : "Generic"
 }
 
