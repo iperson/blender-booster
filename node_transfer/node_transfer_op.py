@@ -254,6 +254,28 @@ def transfer_props(pasted_node, src_node):
             attr = getattr(src_node, identifier)
             setattr(pasted_node, identifier, attr)
 
+    # handle RGB and Vector Curves
+    if src_node.type == "CURVE_RGB" or src_node.type == "CURVE_FLOAT" or src_node.type == "CURVE_VEC":
+        # set points
+        curves = pasted_node.mapping.curves
+        src_curves = src_node.mapping.curves
+        for i in range(len(curves)):
+            points = curves[i].points
+            src_points = src_curves[i].points
+
+            # handle first and last point
+            last_src_point = len(src_points) - 1
+            points[0].location = src_points[0].location.copy()
+            points[0].handle_type = src_points[0].handle_type
+            points[1].location = src_points[last_src_point].location.copy()
+            points[1].handle_type = src_points[last_src_point].handle_type
+
+            # handle the rest
+            for src_p in src_points[1:-1]:
+                p = points.new(src_p.location[0], src_p.location[1])
+                p.handle_type = src_p.handle_type
+
+
     # handle ColorRamp type VALTORGB node
     if src_node.type == "VALTORGB":
         for prop in pasted_node.color_ramp.bl_rna.properties[2:]:
