@@ -5,10 +5,11 @@ bl_info = {
     "name" : "Blender Booster",
     "author" : "Valeri Barashkov",
     "description" : "",
-    "blender" : (3, 2, 0),
-    "version" : (0, 1, 1),
-    "location" : "Either header or the right side panel under BB tab.",
-    "category" : "Generic"
+    "blender" : (3, 6, 0),
+    "version" : (0, 1, 2),
+    "location" : "Either header or the right side panel.",
+    "category" : "Generic",
+    "doc_url": "https://github.com/iperson/blender-booster"
 }
 
 from . import auto_load

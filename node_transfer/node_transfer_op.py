@@ -186,24 +186,25 @@ def transfer_nodes(node_tree, src_node_tree):
         node.select = True
 
 def make_group_copy(node_tree, src_node_group):
+    data_group = None
+
     if "SHADER" == node_tree.type:
         data_group = bpy.data.node_groups.new(src_node_group.name, "ShaderNodeTree")
         node_group = node_tree.nodes.new("ShaderNodeGroup")
-        node_group.node_tree = data_group
     elif "GEOMETRY" == node_tree.type:
         data_group = bpy.data.node_groups.new(src_node_group.name, "GeometryNodeTree")
         node_group = node_tree.nodes.new("GeometryNodeGroup")
-        node_group.node_tree = data_group
     else:
         raise Exception("Error, no match for tree type!")
 
-    node_group.node_tree.name = src_node_group.node_tree.name
-
     # create inputs and outputs
     for src_inp in src_node_group.inputs:
-        node_group.inputs.new(src_inp.rna_type.identifier, src_inp.name)
+        data_group.inputs.new(src_inp.rna_type.identifier, src_inp.name)
     for src_opt in src_node_group.outputs:
-        node_group.outputs.new(src_opt.rna_type.identifier, src_opt.name)
+        data_group.outputs.new(src_opt.rna_type.identifier, src_opt.name)
+        
+    node_group.node_tree = data_group
+    node_group.node_tree.name = src_node_group.node_tree.name
 
     return node_group
 
