@@ -84,15 +84,19 @@ class BOOSTER_OT_PasteNodes(bpy.types.Operator):
 
         return {"FINISHED"}
 
-def transfer_nodes(node_tree, src_node_tree):
+def transfer_nodes(node_tree, src_node_tree, inside_group=False):
     # store transfered nodes using original node names as keys
     # this way node name changes don"t cause a problem
     imported_nodes_dic = {}
 
     for src_node in src_node_tree.active_nodes.values():
+        # switch to material output node if not inside a group node
+        if inside_group == False and node_tree.type == "SHADER" and src_node.type == "GROUP_OUTPUT":
+            pasted_node = node_tree.nodes.new("ShaderNodeOutputMaterial")
         # handle Group node
-        if src_node.type == "GROUP":
+        elif src_node.type == "GROUP":
             pasted_node = make_group_copy(node_tree, src_node)
+
             pasted_node["bb_type"] = "transfer"
 
             # transfer nodes in group
@@ -101,11 +105,10 @@ def transfer_nodes(node_tree, src_node_tree):
                 sub_src_node_tree.active_nodes[n.name] = n
                 sub_src_node_tree.type = src_node_tree.type
 
-            transfer_nodes(pasted_node.node_tree, sub_src_node_tree)
+            transfer_nodes(pasted_node.node_tree, sub_src_node_tree, True)
         # handle all other nodes
         else:
             node_type = src_node.type.title()
-
             # handle special cases for textures
             if "noise" in node_type.lower():
                 node_type = [piece.title() for piece in node_type.split("_")]
@@ -113,20 +116,14 @@ def transfer_nodes(node_tree, src_node_tree):
 
             # add new copied node or generate node if id not available
             try:
-                if src_node.bl_idname == "ShaderNodeGroup":
-                    pasted_node = node_tree.nodes.new("ShaderNodeGroup")
-                elif src_node.bl_idname == "GeometryNodeGroup":
-                    pasted_node = node_tree.nodes.new("GeometryNodeGroup")
-                else:
-                    pasted_node = node_tree.nodes.new(src_node.bl_idname)
-                
+                pasted_node = node_tree.nodes.new(src_node.bl_idname)
                 transfer_props(pasted_node, src_node)
                 pasted_node["bb_type"] = "transfer"
             except RuntimeError:
-                print("BOOSTER: Cannot add node id:", src_node.bl_idname)
                 # see if our blend file has a replacement node
                 pasted_node = get_node_from_file(node_tree, src_node.bl_rna.identifier)
                 if pasted_node == None:
+                    print("BOOSTER: Cannot add node id:", src_node.bl_idname)
                     pasted_node = make_group_from_node(node_tree, src_node)
 
         transfer_location(pasted_node, src_node)
@@ -154,8 +151,14 @@ def transfer_nodes(node_tree, src_node_tree):
         if node.get("bb_type") == "mix":
             continue
 
-        # transfer socket values
         src_node = src_node_tree.active_nodes[name]
+
+        # transfer outputs
+        if node.type == "VALUE":
+            node.outputs[0].default_value = src_node.outputs[0].default_value
+            continue
+
+        # transfer inputs
         for i, inp in enumerate(src_node.inputs):
             if (node.inputs[i].bl_rna.identifier not in 
             ("NodeSocketVirtual", "NodeSocketShader", "NodeSocketGeometry")):
@@ -185,56 +188,70 @@ def transfer_nodes(node_tree, src_node_tree):
     for node in imported_nodes_dic.values():
         node.select = True
 
-def make_group_copy(node_tree, src_node_group):
-    data_group = None
+def check_socket_type(socket_type, node_tree_type):
+    if node_tree_type == "SHADER":
+        if socket_type == 'NodeSocketVectorEuler':
+            return 'NodeSocketVector'
 
+        if socket_type not in ('NodeSocketVector', 'NodeSocketFloat', 'NodeSocketColor'):
+            return 'NodeSocketShader'
+    
+    else:
+        if socket_type == 'NodeSocketFloatFactor':
+            return 'NodeSocketFloat'
+
+        if socket_type not in ('NodeSocketString', 'NodeSocketBool', 'NodeSocketMaterial', 
+            'NodeSocketVector', 'NodeSocketInt', 'NodeSocketMenu', 'NodeSocketCollection',
+            'NodeSocketTexture', 'NodeSocketFloat', 'NodeSocketColor', 'NodeSocketObject',
+            'NodeSocketRotation', 'NodeSocketMatrix', 'NodeSocketImage'):
+
+            return 'NodeSocketGeometry'
+    
+    return socket_type
+
+def make_group_copy(node_tree, src_node):
     if "SHADER" == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node_group.name, "ShaderNodeTree")
+        data_group = bpy.data.node_groups.new(src_node.name, "ShaderNodeTree")
         node_group = node_tree.nodes.new("ShaderNodeGroup")
     elif "GEOMETRY" == node_tree.type:
-        data_group = bpy.data.node_groups.new(src_node_group.name, "GeometryNodeTree")
+        data_group = bpy.data.node_groups.new(src_node.name, "GeometryNodeTree")
         node_group = node_tree.nodes.new("GeometryNodeGroup")
     else:
         raise Exception("Error, no match for tree type!")
 
-    # create inputs and outputs
-    for src_inp in src_node_group.inputs:
-        data_group.inputs.new(src_inp.rna_type.identifier, src_inp.name)
-    for src_opt in src_node_group.outputs:
-        data_group.outputs.new(src_opt.rna_type.identifier, src_opt.name)
+    for src_inp in src_node.inputs:
+        socket_type = check_socket_type(src_inp.bl_idname, node_tree.type)
+        data_group.interface.new_socket(name=src_inp.name, in_out='INPUT', socket_type=socket_type)
+    
+    for src_opt in src_node.outputs:
+        socket_type = check_socket_type(src_opt.bl_idname, node_tree.type)
+        data_group.interface.new_socket(name=src_opt.name, in_out='OUTPUT', socket_type=socket_type)
         
     node_group.node_tree = data_group
-    node_group.node_tree.name = src_node_group.node_tree.name
 
     return node_group
 
 def make_group_from_node(node_tree, src_node):
-    if "SHADER" == node_tree.type:
+    # Determine the node tree type and create a new node group accordingly
+    if node_tree.type == "SHADER":
         data_group = bpy.data.node_groups.new(src_node.name, "ShaderNodeTree")
         node_group = node_tree.nodes.new("ShaderNodeGroup")
         node_group.node_tree = data_group
-    elif "GEOMETRY" == node_tree.type:
+    elif node_tree.type == "GEOMETRY":
         data_group = bpy.data.node_groups.new(src_node.name, "GeometryNodeTree")
         node_group = node_tree.nodes.new("GeometryNodeGroup")
         node_group.node_tree = data_group
     else:
         raise Exception("Error, no match for tree type!")
 
-    # change socket type to current node tree type
-    def re_type(type):
-        if "shader" in type.lower():
-            return "NodeSocketGeometry"
-        if "geom" in type.lower():
-            return "NodeSocketShader"
-        return type
-
-    # create inputs and outputs
+    # Create inputs and outputs in the node group's node tree
     for src_inp in src_node.inputs:
-        type = re_type(src_inp.rna_type.identifier)
-        node_group.inputs.new(type, src_inp.name)
+        socket_type = check_socket_type(src_inp.bl_idname, node_tree.type)
+        data_group.interface.new_socket(name=src_inp.name, in_out='INPUT', socket_type=socket_type)
+    
     for src_opt in src_node.outputs:
-        type = re_type(src_opt.rna_type.identifier)
-        node_group.outputs.new(type, src_opt.name)
+        socket_type = check_socket_type(src_opt.bl_idname, node_tree.type)
+        data_group.interface.new_socket(name=src_opt.name, in_out='OUTPUT', socket_type=socket_type)
 
     # set some custom properties
     node_group["bb_type"] = "mix"
@@ -275,7 +292,6 @@ def transfer_props(pasted_node, src_node):
             for src_p in src_points[1:-1]:
                 p = points.new(src_p.location[0], src_p.location[1])
                 p.handle_type = src_p.handle_type
-
 
     # handle ColorRamp type VALTORGB node
     if src_node.type == "VALTORGB":
